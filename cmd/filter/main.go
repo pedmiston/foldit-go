@@ -8,18 +8,29 @@ import (
 )
 
 var storage *minio.Client
+var bucket = "foldit"
 
 func main() {
-	var keys chan string
+	var keysCh chan string
+	var objsCh chan *minio.Object
 	connectStorage()
-	keys, nKeys := findKeysInBucket("foldit")
-	log.Printf("Found %s keys:", nKeys)
+	keysCh, nKeys := findKeysInBucket()
+	objsCh, nObjs = getObjectsFromKeys(keysCh, nKeys)
 
-	i := 1
-	for k := range keys {
-		log.Printf("%s: %s", i, k)
-		i++
-	}
+	// Manage goroutines pulling objects from the channel
+	//
+	// for obj in objsCh:
+	//   for each line in obj:
+	//     extract filepath
+	//     is this filepath unique?
+	//     yes -> save line to output
+	//     no -> next line
+	//
+	//   is there any output?
+	//   yes -> push output to S3, overwriting source
+	//   no  -> delete source on S3
+	//
+	//   signal done
 
 }
 
@@ -49,7 +60,7 @@ func lookupEnv(key string) string {
 }
 
 // findKeysInBucket fills a chan with keys.
-func findKeysInBucket(bucket string) (keys chan string, nKeys int) {
+func findKeysInBucket() (keys chan string, nKeys int) {
 	keys = make(chan string)
 
 	prefix := "" // list all objects in bucket
@@ -70,4 +81,21 @@ func findKeysInBucket(bucket string) (keys chan string, nKeys int) {
 	}
 
 	return keys, nKeys
+}
+
+func getObjectsFromKeys(keysCh chan string, nKeys int) (objsCh chan *minio.Object, nObjs int) {
+	objsCh = make(chan *minio.Object)
+
+	for i := 0; i < nKeys; i++ {
+		key := <-keysCh
+
+		go func(k string) {
+			obj, _ := storage.GetObject(bucket, k, minio.GetObjectOptions{})
+			objsCh <- obj
+		}(key)
+
+		nObjs++
+	}
+
+	return objsCh, nObjs
 }
